@@ -5,7 +5,7 @@ Plugin URI: http://www.torounit.com
 Description:  Add post archives of custom post type and customizable permalinks.
 Author: Toro-Unit
 Author URI: http://www.torounit.com/plugins/custom-post-type-permalinks/
-Version: 0.6.2
+Version: 0.7
 */
 
 
@@ -33,13 +33,40 @@ Version: 0.6.2
 /* This plugin don't support Multisite yet.*/
 
 
+function get_taxonomy_parents( $id, $taxonomy = 'category', $link = false, $separator = '/', $nicename = false, $visited = array() ) {
+	$chain = '';
+	$parent = &get_term( $id, $taxonomy, OBJECT, 'raw');
+	if ( is_wp_error( $parent ) )
+		return $parent;
+
+	if ( $nicename )
+		$name = $parent->slug;
+	else
+		$name = $parent->name;
+
+	if ( $parent->parent && ( $parent->parent != $parent->term_id ) && !in_array( $parent->parent, $visited ) ) {
+		$visited[] = $parent->parent;
+		$chain .= get_taxonomy_parents( $parent->parent, $taxonomy, $link, $separator, $nicename, $visited );
+	}
+
+	if ( $link )
+		$chain .= '<a href="' . get_term_link( $parent->term_id, $taxonomy ) . '" title="' . esc_attr( sprintf( __( "View all posts in %s" ), $parent->name ) ) . '">'.$name.'</a>' . $separator;
+	else
+		$chain .= $name.$separator;
+	return $chain;
+}
+
+
+
+
+
 
 class Custom_Post_Type_Permalinks {
 
-	function init_function(){
-		add_action('init',array(&$this,'set_archive_rewrite'),99);
-		add_action('init', array(&$this,'set_rewrite'),100);
-		add_filter('post_type_link', array(&$this,'set_permalink'),10,2);
+	function add_hooks(){
+		add_action('wp_loaded',array(&$this,'set_archive_rewrite'),99);
+		add_action('wp_loaded', array(&$this,'set_rewrite'),100);
+		add_filter('post_type_link', array(&$this,'set_permalink'),10,3);
 
 		add_filter('getarchives_where', array(&$this,'get_archives_where'), 10, 2);
 		add_filter('get_archives_link', array(&$this,'get_archives_link'));
@@ -48,12 +75,13 @@ class Custom_Post_Type_Permalinks {
 		add_filter('term_link', array(&$this,'set_term_link'),10,3);
 
 
+	}
+	
+	static function uninstall_hook(){
 		if ( function_exists('register_uninstall_hook') ) {
 			register_uninstall_hook(__FILE__, array(&$this,'uninstall_hook_custom_permalink'));
 		}
-
 	}
-	
 	
 
 
@@ -61,7 +89,7 @@ class Custom_Post_Type_Permalinks {
 
 	//カスタム投稿タイプのアーカイブのリライトルールの追加
 	function set_archive_rewrite() {
-		$post_types = get_post_types(array("_builtin"=>false));
+		$post_types = get_post_types(array("_builtin"=>false,"publicly_queryable"=>true));
 
 		foreach ($post_types as $post_type):
 			if(!$post_type) continue;
@@ -75,6 +103,7 @@ class Custom_Post_Type_Permalinks {
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})/page/?([0-9]{1,})/?$','index.php?year=$matches[1]&monthnum=$matches[2]&day=$matches[3]&paged=$matches[4]&post_type='.$post_type,"top");
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})/?$','index.php?year=$matches[1]&monthnum=$matches[2]&day=$matches[3]&post_type='.$post_type,"top");
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/feed/(feed|rdf|rss|rss2|atom)/?$','index.php?year=$matches[1]&monthnum=$matches[2]&feed=$matches[3]&post_type='.$post_type,"top");
+
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/(feed|rdf|rss|rss2|atom)/?$','index.php?year=$matches[1]&monthnum=$matches[2]&feed=$matches[3]&post_type='.$post_type,"top");
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/page/?([0-9]{1,})/?$','index.php?year=$matches[1]&monthnum=$matches[2]&paged=$matches[3]&post_type='.$post_type,"top");
 				add_rewrite_rule($slug.'/date/([0-9]{4})/([0-9]{1,2})/?$','index.php?year=$matches[1]&monthnum=$matches[2]&post_type='.$post_type,"top");
@@ -107,88 +136,92 @@ class Custom_Post_Type_Permalinks {
 
 
 
-	//パーマリンク構造を登録
+	//rewrite_tagの追加
 	function set_rewrite() {
 		global $wp_rewrite;
-		$post_types = get_post_types(array("_builtin"=>false));
+		$post_types = get_post_types(array("_builtin"=>false,"publicly_queryable"=>true));
+
 		foreach ($post_types as $post_type):
 	
 			$permalink = get_option($post_type."_structure");			
 			$slug = get_post_type_object($post_type)->rewrite["slug"];
+
 			if(!$permalink){
 				$permalink = '/%year%/%monthnum%/%day%/%post_id%/';	
 			}
+
+			$permalink = str_replace('%postname%',"%$post_type%",$permalink);
+
+			$permalink = '/%post_type%/'.$permalink;			
+			$permalink = str_replace('//','/',$permalink);
 			
-			//フラグ
-			$post_id_count = 0;
-			$postname_count = 0;
-			
-			//個別記事のパーマリンク
-			$permalink = str_replace('%post_id%','%'.$post_type.'_id%',$permalink,$post_id_count);
-			$permalink = str_replace('%postname%','%'.$post_type.'name%',$permalink,$postname_count);
 
-			$wp_rewrite->add_rewrite_tag('%'.$post_type.'_id%', '([^/]+)','post_type='.$post_type.'&p=');
-			$wp_rewrite->add_rewrite_tag('%'.$post_type.'name%', '([^/]+)',$post_type.'=');
-			$wp_rewrite->add_permastruct($post_type,$slug.$permalink, false);
+			$wp_rewrite->add_rewrite_tag('%post_type%', '([^/]+)','post_type=');
+			$wp_rewrite->add_permastruct($post_type,$permalink, false);
 
-
-			
-			//個別投稿のページング
-			$permalink_paged = $permalink;
-
-			$permalink_paged = str_replace("%year%","[0-9]{4}", $permalink_paged);
-			$permalink_paged = str_replace("%monthnum%","[0-9]{1,2}", $permalink_paged);
-			$permalink_paged = str_replace("%day%","[0-9]{1,2}", $permalink_paged);
-			$permalink_paged = str_replace("%hour%","[0-9]{1,2}", $permalink_paged);
-			$permalink_paged = str_replace("%minute%","[0-9]{1,2}", $permalink_paged);
-			$permalink_paged = str_replace("%second%","[0-9]{1,2}", $permalink_paged);
-
-			$permalink_paged = str_replace('%'.$post_type.'_id%',"([0-9]{1,})", $permalink_paged);
-			$permalink_paged = str_replace('%'.$post_type.'name%',"([^/]+)", $permalink_paged);
-
-
-			$permalink_paged = $permalink_paged."/([0-9]{1,})/?$";
-			$permalink_paged = str_replace("//","/", $permalink_paged);
-			
-			$count = $post_id_count + $postname_count;
-			
-			if( $count == 1 ){
-				if($post_id_count) {
-					add_rewrite_rule($slug.$permalink_paged,'index.php?p=$matches[1]&page=$matches[2]&post_type='.$post_type,"top");
-				}
-				elseif($postname_count) {
-					add_rewrite_rule($slug.$permalink_paged,'index.php?'.$post_type.'=$matches[1]&page=$matches[2]&post_type='.$post_type,"top");
-				}
-
-			}elseif( $count == 2 ) {
-				if(strpos($permalink,'%'.$post_type.'_id%') < strpos($permalink,'%'.$post_type.'name%')){
-					add_rewrite_rule($slug.$permalink_paged,'index.php?p=$matches[1]&page=$matches[3]&post_type='.$post_type,"top");
-				}else{
-					add_rewrite_rule($slug.$permalink_paged,'index.php?p=$matches[2]&page=$matches[3]&post_type='.$post_type,"top");
-				}
-				
+			if(!$slug or $slug != $post_type){
+				$wp_rewrite->add_rewrite_tag('%$slug%', '([^/]+)',"post_type=$post_type&slug=");
+				$wp_rewrite->add_permastruct($post_type,str_replace("%post_type%","%$slug%",$permalink), false);
 			}
 
 
 		endforeach;
+
+		//カスタム分類の対応
+		$taxonomies = get_taxonomies(array("show_ui" => true),'objects');
+		foreach ( $taxonomies as $taxonomy => $objects ):
+			$wp_rewrite->add_rewrite_tag("%$taxonomy%", '(.+?)',"$taxonomy=");
+		endforeach;
+		
+		$wp_rewrite->use_verbose_page_rules = true;
+	}
+	
+	function term_id_asc($a, $b){
+	
+		if($a->term_id < $b->term_id){
+			return -1;
+		}else if($a->term_id > $b->term_id){
+			return 1;
+		}else{
+			return 0;
+		}
 	}
 
 
-	//個別投稿の出力URLの変更
-	function set_permalink($post_link, $id = 0) {
+	//パーマリンクの出力の変更
+	function set_permalink($post_link, $post,$leavename) {
 		global $wp_rewrite;
 
-		$post = &get_post($id);
-		if (is_wp_error($post)){
-			return $post;	
-		}
-
 		$newlink = $wp_rewrite->get_extra_permastruct($post->post_type);
+		$slug = get_post_type_object($post->post_type)->rewrite["slug"];
+		$newlink = str_replace("%$slug%", $slug, $newlink);
 	
-		$newlink = str_replace("%".$post->post_type."%", $post->post_type, $newlink);
-		$newlink = str_replace("%".$post->post_type."_id%", $post->ID, $newlink);
-		$newlink = str_replace("%".$post->post_type."name%", $post->post_name, $newlink);
+		$newlink = str_replace("%post_type%", $post->post_type, $newlink);
+		$newlink = str_replace("%post_id%", $post->ID, $newlink);
+		if(!$leavename){
+			$newlink = str_replace("%$post->post_type%", $post->post_name, $newlink);
+		}
 		
+
+		//カスタム分類の対応
+		$taxonomies = get_taxonomies(array("show_ui" => true),'objects');
+		foreach ( $taxonomies as $taxonomy => $objects ) {
+			$term = '';
+			if ( strpos($newlink, "%$taxonomy%") !== false ) {
+			$terms = get_the_terms($post->ID,$taxonomy);
+				if ( $terms ) {
+					usort($terms, '_usort_terms_by_ID'); // order by ID
+					$term = $terms[0]->slug;
+					if ( $parent = $terms[0]->parent )
+						$term = get_taxonomy_parents($parent,$taxonomy, false, '/', true) . $term;
+				}
+			$newlink = str_replace("%$taxonomy%", $term, $newlink);
+			}
+		
+		}
+		
+
+
 		
 		$user = get_userdata($post->post_author);
 		$newlink = str_replace("%author%", $user->user_login, $newlink);
@@ -203,7 +236,8 @@ class Custom_Post_Type_Permalinks {
 		$newlink = str_replace("%hour%",date("H",$post_date), $newlink);
 		$newlink = str_replace("%minute%",date("i",$post_date), $newlink);
 		$newlink = str_replace("%second%",date("s",$post_date), $newlink);
-	
+
+		$newlink = str_replace('//',"/",$newlink);
 	
 		$newlink = home_url(user_trailingslashit($newlink));
 		return $newlink;
@@ -293,8 +327,8 @@ class Custom_Post_Type_Permalinks {
 
 
 	//アンインストール時
-	function uninstall_hook_custom_permalink () {
-		$post_types = get_post_types(array("_builtin"=>false));
+	static function uninstall_hook_custom_permalink () {
+		$post_types = get_post_types(array("_builtin"=>false,"publicly_queryable"=>true));
 		foreach ($post_types as $post_type):
 			delete_option($post_type."_structure");
 		endforeach;
@@ -304,74 +338,79 @@ class Custom_Post_Type_Permalinks {
 
 }
 
-if(get_option("permalink_structure") != ""){
-	$custom_post_type_permalinks = new Custom_Post_Type_Permalinks;
-	$custom_post_type_permalinks->init_function();
-}
-
 
 
 
 class Custom_Post_Type_Permalinks_Admin {
 
-	function init_function(){
+	function add_hooks(){
 		add_action('init', array(&$this,'load_textdomain'));
-		add_action('admin_menu', array(&$this,'admin_menu_custom_permalink'));
+		add_action('admin_init', array(&$this,'settings_api_init'));
 	
 	}
  	function load_textdomain(){
 		load_plugin_textdomain('cptp',false,'custom-post-type-permalinks');	
 	}
- 
-	function admin_menu_custom_permalink () {
-		// 設定メニュー下にサブメニューを追加:
-		$menuName = __("Permalinks of Custom post type","cptp");
-		add_options_page($menuName, $menuName, 'manage_options', __FILE__, array(&$this,'admin_menu_custom_permalink_callback'));
-	}
- 
-	// プラグインページのコンテンツを表示
-	function admin_menu_custom_permalink_callback () {
-		global $wp_rewrite;
-		$wp_rewrite->flush_rules();
 	
-		// 設定変更画面を表示する
-	?>
-	<div class="wrap">
-		<div class="icon32" id="icon-options-general"></div>
-		<h2><?php echo __("Permalinks of Custom post type","cptp"); //カスタム投稿タイプのパーマリンク?></h2>
-		<form method="post" action="options.php">
-			<?php wp_nonce_field('update-options'); ?>
+ 
+	function settings_api_init() {
+	 	add_settings_section('setting_section',
+			__("Permalink Setting for custom post type","cptp"),
+			 array(&$this,'setting_section_callback_function'),
+			'permalink');
+
+
+		
+		$post_types = get_post_types(array("_builtin"=>false,"publicly_queryable"=>true));
+		foreach ($post_types as $post_type):
+			if(isset($_POST["submit"])){
+				update_option($post_type."_structure",esc_attr($_POST[$post_type."_structure"]));
+			}
+
+	 		add_settings_field($post_type."_structure",
+				$post_type,
+				array(&$this,'setting_callback_function'),
+				'permalink',
+				'setting_section',
+				$post_type."_structure");
+ 	
+		 	register_setting('permalink',$post_type."_structure");
+		endforeach;
+	
+	}
+ 
+ 
+ 
+	function setting_section_callback_function() {
+		//セクションの上の説明文
+		?>
 			<p><?php _e("Setting permalinks of custom post type.","cptp");//カスタム投稿タイプごとのパーマリンク構造を設定できます。?><br />
-			<?php _e("The tags you can use is '%year%','%monthnum%','%day%','%hour%','%minute%','%second%','%postname%','%post_id%' and '%author%'.","cptp");//使用できるタグは、%year%,%monthnum%,%day%,%hour%,%minute%,%second%,%postname%,%post_id%,%author%です。?><br />
-			<?php _e("If you don't entered permalink structure, permalink is configured /%year%/%monthnum%/%day%/%post_id%/.","cptp");//未入力のときは、/%year%/%monthnum%/%day%/%post_id%/に設定されます。?>
+			<?php _e("The tags you can use is '%year%','%monthnum%','%day%','%hour%','%minute%','%second%','%postname%','%post_id%','%author%','%category%','%tag%' and '%{custom_taxonomy_slug}%(Replace the taxomomy term)'.","cptp");?><br />
+			<?php _e("If you don't entered permalink structure, permalink is configured /%year%/%monthnum%/%day%/%post_id%/.","cptp");?>
 			</p>
-			<table class="form-table">
-			<?php
-			$post_types = get_post_types(array("_builtin"=>false));
-			$page_options = "";
-			foreach ($post_types as $post_type):
-			
-			?>
-				<tr valign="top"><th scope="row"><?php echo $post_type;?></th><td>/<?php echo get_post_type_object($post_type)->rewrite["slug"];?>&nbsp;<input type="text" name="<?php echo $post_type."_structure";?>" value="<?php echo get_option($post_type."_structure"); ?>" class="regular-text code" />
-</td></tr>
-			<?php
-			$page_options .= $post_type."_structure".",";
-			endforeach;?>
-			</table>
-			<input type="hidden" name="action" value="update" />
-			<?php $page_options = rtrim($page_options, ",");?>
-
-			<input type="hidden" name="page_options" value="<?php echo $page_options;?>" />
-			<p class="submit">
-				<input type="submit" class="button-primary" value="<?php _e('Save Changes') ?>" />
-			</p>
-		</form>
-	</div>
-
-<?php
+		<?php
+	}
+ 
+ 
+	function setting_callback_function(  $option  ) {
+		
+		$post_type = str_replace("_structure","" ,$option);
+		echo '/'.$post_type.'<input name="'.$option.'" id="'.$option.'" type="text" class="regular-text code" value="' . get_option($option) .'" />';
 
 	}
+
+
 
 }
+
+
+$custom_post_type_permalinks = new Custom_Post_Type_Permalinks;
+
+if(get_option("permalink_structure") != ""){
+	$custom_post_type_permalinks->add_hooks();
+}
+$custom_post_type_permalinks->uninstall_hook();
+
 $custom_post_type_permalinks_admin = new Custom_Post_Type_Permalinks_Admin;
-$custom_post_type_permalinks_admin->init_function();
+$custom_post_type_permalinks_admin->add_hooks();
+
