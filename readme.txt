@@ -3,7 +3,7 @@ Contributors: Toro_Unit
 Tags: custom post type,permalink
 Requires at least: 3.2
 Tested up to: 3.3
-Stable tag: 0.7.5.2
+Stable tag: 0.7.5.6
 
 Lets you edit the permalink of custom post type.
 
@@ -32,25 +32,25 @@ That's it. You can access the permalinks setting by going to *Settings -> Permal
 
 == Changelog ==
 
-=0.7.5=
+= 0.7.5 =
 * Add ability to disable to change custom taxonomy archive's permalink.
 
 
-=0.7.4=
+= 0.7.4 =
 * Bug fix taxonomy rewrite.
 
 
-=0.7.3=
+= 0.7.3 =
 * Changed part for saving the data.
 
-=0.7.2=
+= 0.7.2 =
 * Reweite bug fix.
 * Prewview bug fix.
 
-=0.7.1=
+= 0.7.1 =
 * Bug fix.
 
-=0.7=
+= 0.7 =
 * Add %{taxonomy}% tag.
 * A large number of Bug Fix.
 * Change Setting Page. Use Setting API.
