@@ -5,7 +5,7 @@ Plugin URI: http://www.torounit.com
 Description:  Add post archives of custom post type and customizable permalinks.
 Author: Toro-Unit
 Author URI: http://www.torounit.com/plugins/custom-post-type-permalinks/
-Version: 0.8.1
+Version: 0.8.6
 Text Domain: cptp
 Domain Path: /
 */
@@ -47,7 +47,7 @@ class Custom_Post_Type_Permalinks {
 	 * @version 2.0
 	 */
 
-	public function  __construct () {
+	public function  add_hook () {
 		add_action('wp_loaded',array(&$this,'set_archive_rewrite'),99);
 		add_action('wp_loaded', array(&$this,'set_rewrite'),100);
 		add_action('wp_loaded', array(&$this,'add_tax_rewrite'));
@@ -127,7 +127,7 @@ class Custom_Post_Type_Permalinks {
 			add_rewrite_rule( $slug.'/date/([0-9]{4})/(feed|rdf|rss|rss2|atom)/?$', 'index.php?year=$matches[1]&feed=$matches[2]&post_type='.$post_type, 'top' );
 			add_rewrite_rule( $slug.'/date/([0-9]{4})/page/?([0-9]{1,})/?$', 'index.php?year=$matches[1]&paged=$matches[2]&post_type='.$post_type, 'top' );
 			add_rewrite_rule( $slug.'/date/([0-9]{4})/?$', 'index.php?year=$matches[1]&post_type='.$post_type, 'top' );
-			add_rewrite_rule( $slug.'/author/([^/]+)/?$', 'index.php?author=$matches[1]&post_type='.$post_type, 'top' );
+			add_rewrite_rule( $slug.'/author/([^/]+)/?$', 'index.php?author_name=$matches[1]&post_type='.$post_type, 'top' );
 			add_rewrite_rule( $slug.'/page/?([0-9]{1,})/?$', 'index.php?paged=$matches[1]&post_type='.$post_type, 'top' );
 			add_rewrite_rule( $slug.'/?$', 'index.php?post_type='.$post_type, 'top' );
 
@@ -139,7 +139,8 @@ class Custom_Post_Type_Permalinks {
 	/**
 	 *
 	 * Add Rewrite rule for single posts.
-	 * @version 1.5
+	 * @version 2.0
+	 * 
 	 *
 	 */
 	public function set_rewrite() {
@@ -161,15 +162,29 @@ class Custom_Post_Type_Permalinks {
 				$slug = $post_type;
 
 			$permalink = '/'.$slug.'/'.$permalink;
-			$permalink = $permalink.'/%'.$post_type.'_page%';
+			
+			if( strpos( $permalink , '%'.$post_type.'%' ) === false ) {
+				$permalink = $permalink.'/%'.$post_type.'_page%';	
+			}
+
 			$permalink = str_replace( '//', '/', $permalink );
 
 			$wp_rewrite->add_rewrite_tag( '%post_type%', '([^/]+)', 'post_type=' );
 			$wp_rewrite->add_rewrite_tag( '%'.$post_type.'_id%', '([0-9]{1,})','post_type='.$post_type.'&p=' );
 			$wp_rewrite->add_rewrite_tag( '%'.$post_type.'_page%', '([0-9]{1,}?)',"page=" );
 
-			$wp_rewrite->generate_rewrite_rules( $permalink, EP_NONE, true, true, true,true);
-			$wp_rewrite->add_permastruct( $post_type, $permalink, false );
+			$param = array(
+				'with_front' => false,
+				'ep_mask' => EP_ALL,
+				'paged' => true,
+				'feed' => true,
+				'forcomments' => true,
+				'walk_dirs' => true,
+				'endpoints' => true,
+			);
+
+			//$wp_rewrite->generate_rewrite_rules( $permalink, EP_NONE, true, true, true,true);
+			$wp_rewrite->add_permastruct( $post_type, $permalink, $param );
 		endforeach;
 
 		$taxonomies = get_taxonomies( array("show_ui" => true, "_builtin" => false), 'objects' );
@@ -183,10 +198,15 @@ class Custom_Post_Type_Permalinks {
 	/**
 	 *
 	 * Fix permalinks output.
-	 * @version 1.0
+	 *
+	 * @param String $post_link　
+	 * @param Object $post　投稿情報
+	 * @param String $leavename 記事編集画面でのみ渡される
+	 *
+	 * @version 1.2
 	 *
 	 */
-	public function set_permalink( $post_link, $post,$leavename ) {
+	public function set_permalink( $post_link, $post, $leavename ) {
 		global $wp_rewrite;
 		$draft_or_pending = isset( $post->post_status ) && in_array( $post->post_status, array( 'draft', 'pending', 'auto-draft' ) );
 		if( $draft_or_pending and !$leavename )
@@ -201,10 +221,12 @@ class Custom_Post_Type_Permalinks {
 		$permalink = str_replace( '%'.$post_type.'_cpage%', "", $permalink );
 
 		$parentsDirs = "";
-		$postId = $post->ID;
-		while ($parent = get_post($postId)->post_parent) {
-			$parentsDirs = get_post($parent)->post_name."/".$parentsDirs;
-			$postId = $parent;
+		if( !$leavename ){
+			$postId = $post->ID;
+			while ($parent = get_post($postId)->post_parent) {
+				$parentsDirs = get_post($parent)->post_name."/".$parentsDirs;
+				$postId = $parent;
+			}
 		}
 
 		$permalink = str_replace( '%'.$post_type.'%', $parentsDirs.'%'.$post_type.'%', $permalink );
@@ -246,9 +268,9 @@ class Custom_Post_Type_Permalinks {
 
 		$permalink = str_replace('//', "/", $permalink );
 
-		$permalink = home_url( user_trailingslashit( $permalink ) );
-		$str = rtrim( preg_replace("/%[a-z,_]*%/","",get_option("permalink_structure")) ,'/');
-		return $permalink = str_replace($str, "", $permalink );
+		return $permalink = home_url( user_trailingslashit( $permalink ) );
+		//$str = rtrim( preg_replace("/%[a-z,_]*%/","",get_option("permalink_structure")) ,'/');
+		//return $permalink = str_replace($str, "", $permalink );
 
 	}
 
@@ -307,14 +329,15 @@ class Custom_Post_Type_Permalinks {
 		$this->get_archives_where_r['post_type'] = isset($this->get_archives_where_r['post_type_slug']) ? $this->get_archives_where_r['post_type_slug'] : $t; // [steve] [*** bug fixing]
 
 		if (isset($this->get_archives_where_r['post_type'])  and  $this->get_archives_where_r['type'] != 'postbypost'){
-			$blog_url = get_bloginfo("url");
+			$blog_url = rtrim( get_bloginfo("url") ,'/');
 
-			// /archive/%post_id%
-			$str = rtrim( preg_replace("/\.[a-z,_]*/","",get_option("permalink_structure")) ,'');
-			if($str = rtrim( preg_replace("/%[a-z,_]*%/","",$str) ,'/')) {
+			//remove .ext
+			$str = preg_replace("/\.[a-z,_]*/","",get_option("permalink_structure"));
+
+			if($str = rtrim( preg_replace("/%[a-z,_]*%/","",$str) ,'/')) { // /archive/%post_id%
 				$ret_link = str_replace($str, '/'.'%link_dir%', $link);
 			}else{
-				$blog_url = rtrim($blog_url,"/");
+				$blog_url = preg_replace('/https?:\/\//', '', $blog_url);
 				$ret_link = str_replace($blog_url,$blog_url.'/'.'%link_dir%',$link);
 			}
 
@@ -436,10 +459,12 @@ class Custom_Post_Type_Permalinks {
 
 class Custom_Post_Type_Permalinks_Admin {
 
-	public function  __construct () {
+	public function  add_hook () {
 		add_action('init', array(&$this,'load_textdomain'));
 		add_action('init', array(&$this, 'update_rules'));
 		add_action('admin_init', array(&$this,'settings_api_init'),30);
+		add_action('admin_enqueue_scripts', array(&$this,'enqueue_css_js'));
+		add_action('admin_footer',array(&$this,'pointer_js'));
 	}
 
 	public function load_textdomain() {
@@ -480,7 +505,12 @@ class Custom_Post_Type_Permalinks_Admin {
 	}
 
 
-
+	/**
+	 *
+	 * Setting Init
+	 * @since 0.7
+	 *
+	 */
 	public function settings_api_init() {
 		add_settings_section('cptp_setting_section',
 			__("Permalink Setting for custom post type",'cptp'),
@@ -550,7 +580,7 @@ class Custom_Post_Type_Permalinks_Admin {
 			<?php _e("The tags you can use is WordPress Structure Tags and '%\"custom_taxonomy_slug\"%'. (e.g. %actors%)",'cptp');?><br />
 			<?php _e("%\"custom_taxonomy_slug\"% is replaced the taxonomy's term.'.",'cptp');?></p>
 
-			<p><?php _e("Presence of the trailing '/' is unified into a standard permalink structure setting.",'cptp');?><br />
+			<p><?php _e("Presence of the trailing '/' is unified into a standard permalink structure setting.",'cptp');?>
 			<?php _e("If you don't entered permalink structure, permalink is configured /%postname%/'.",'cptp');?>
 			</p>
 		<?php
@@ -562,14 +592,69 @@ class Custom_Post_Type_Permalinks_Admin {
 		if( !$slug )
 			$slug = $post_type;
 
-		echo '/'.$slug.' <input name="'.$option.'" id="'.$option.'" type="text" class="regular-text code" value="' . get_option($option) .'" />';
+		$value = get_option($option);
+		if( !$value )
+			$value = Custom_Post_Type_Permalinks::$default_structure;
+
+		echo '<code>'.home_url().'/'.$slug.'</code> <input name="'.$option.'" id="'.$option.'" type="text" class="regular-text code" value="' . $value .'" />';
 	}
 
 	public function setting_no_tax_structure_callback_function(){
 		echo '<input name="no_taxonomy_structure" id="no_taxonomy_structure" type="checkbox" value="1" class="code" ' . checked( false, get_option('no_taxonomy_structure'),false) . ' />　';
-		_e("If you check,The custom taxonomy's permalinks is example.com/post_type/taxonomy/term.","cptp");
+		$txt = __("If you check,The custom taxonomy's permalinks is <code>%s/post_type/taxonomy/term</code>.","cptp");
+		printf($txt , home_url());
+	}
+
+
+	/**
+	 *
+	 * enqueue CSS and JS
+	 * @since 0.8.5
+	 *
+	 */
+	public function enqueue_css_js() {
+		wp_enqueue_style('wp-pointer');
+		wp_enqueue_script('wp-pointer');
+	}
+
+
+	/**
+	 *
+	 * add js for pointer
+	 * @since 0.8.5
+	 */
+	public function pointer_js() {
+		if(!is_network_admin()) {
+			$dismissed = explode(',', get_user_meta( get_current_user_id(), 'dismissed_wp_pointers', true ));
+			if(array_search('cptp_pointer085', $dismissed) === false){
+			?>
+				<script type="text/javascript">
+				jQuery(function($) {
+					
+					$("#menu-settings .wp-has-submenu").pointer({
+						content: "<h3>Custom Post Type Permalinks</h3><p><a href='options-permalink.php'>パーマリンク設定</a>より、カスタム投稿タイプごとのパーマリンクを設定できます。</p>",
+						position: {"edge":"left","align":"center"},
+						close: function() {
+							$.post('admin-ajax.php', {
+								action:'dismiss-wp-pointer',
+								pointer: 'cptp_pointer085'
+							})
+
+						}
+					}).pointer("open");
+				});
+				</script>
+			<?php
+			}
+		}
 	}
 }
 
 $custom_post_type_permalinks = new Custom_Post_Type_Permalinks;
+$custom_post_type_permalinks = apply_filters('custom_post_type_permalinks', $custom_post_type_permalinks);
+$custom_post_type_permalinks->add_hook();
+
 $custom_post_type_permalinks_admin =  new Custom_Post_Type_Permalinks_Admin;
+$custom_post_type_permalinks_admin = apply_filters('custom_post_type_permalinks_admin', $custom_post_type_permalinks_admin);
+$custom_post_type_permalinks_admin->add_hook();
+?>
